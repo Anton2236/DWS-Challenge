@@ -162,6 +162,49 @@ class TransferServiceTest {
         assertThat(notificationCounts.get(account3.getAccountId())).isEqualTo(2);
     }
 
+    @Test
+    void makeConcurrentTransfers2() throws ExecutionException, InterruptedException {
+        Account account1 = new Account("Id-1", new BigDecimal(1000000));
+        accountsService.createAccount(account1);
+
+        Account account2 = new Account("Id-2", new BigDecimal(10000));
+        accountsService.createAccount(account2);
+
+        Account account3 = new Account("Id-3", new BigDecimal(1000000));
+        accountsService.createAccount(account3);
+
+        Account account4 = new Account("Id-4", new BigDecimal(10000));
+        accountsService.createAccount(account4);
+
+        List<Transfer> transfers = new ArrayList<>();
+        transfers.add(new Transfer(account1.getAccountId(), account2.getAccountId(), BigDecimal.valueOf(1000)));
+        transfers.add(new Transfer(account2.getAccountId(), account1.getAccountId(), BigDecimal.valueOf(500)));
+
+        transfers.add(new Transfer(account3.getAccountId(), account4.getAccountId(), BigDecimal.valueOf(1000)));
+        transfers.add(new Transfer(account1.getAccountId(), account3.getAccountId(), BigDecimal.valueOf(500)));
+
+        try (ExecutorService executor = Executors.newCachedThreadPool()) {
+            List<Future<?>> futures = new ArrayList<>();
+            for (int i = 0; i < 100; i++) {
+                futures.addAll(transfers.stream().map(t -> executor.submit(() -> transferService.makeTransfer(t))).toList());
+            }
+            for (var future : futures) {
+                future.get();
+            }
+        }
+
+        assertThat(account1.getBalance()).isEqualTo(BigDecimal.valueOf(900000));
+        assertThat(account2.getBalance()).isEqualTo(BigDecimal.valueOf(60000));
+
+        assertThat(account3.getBalance()).isEqualTo(BigDecimal.valueOf(950000));
+        assertThat(account4.getBalance()).isEqualTo(BigDecimal.valueOf(110000));
+
+        assertThat(notificationCounts.get(account1.getAccountId())).isEqualTo(300);
+        assertThat(notificationCounts.get(account2.getAccountId())).isEqualTo(200);
+        assertThat(notificationCounts.get(account3.getAccountId())).isEqualTo(200);
+        assertThat(notificationCounts.get(account4.getAccountId())).isEqualTo(100);
+    }
+
 
     private NotificationService mockNotificationService(Map<String, Integer> notificationCounts) {
         return (account, transferDescription) -> {
